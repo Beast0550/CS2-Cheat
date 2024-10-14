@@ -4,10 +4,13 @@ import win32api, win32con
 import threading
 import time
 
-print("Settings Classes...")
-
-radius=15
-print("Radius = " + str(radius))
+# Settings
+radius = 15
+attack_teammates = False
+draw_circle = True
+draw_rectangles = True
+draw_skeletons = True
+print(f"Radius = {radius}")
 
 
 class Offsets:
@@ -65,13 +68,10 @@ class Entity:
 
 class CS2Esp:
     def __init__(self):
-        time.sleep(0.5)
         print("Hooking...")
         self.proc = pm.open_process("cs2.exe")
         self.mod = pm.get_module(self.proc, "client.dll")["base"]
-        time.sleep(2.5)
         print("Attached!")
-        time.sleep(0.1)
         print("Updating Offsets...")
         self.localTeam = None
         offsets_name = ["dwViewMatrix", "dwEntityList", "dwLocalPlayerController", "dwLocalPlayerPawn"]
@@ -91,8 +91,8 @@ class CS2Esp:
         }
         clientDll = requests.get("https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json").json()
         [setattr(Offsets, k, clientDll["client.dll"]["classes"][client_dll_name[k]]["fields"][k]) for k in client_dll_name]
-        time.sleep(1.5)
         print("Offsets up to date!")
+
     def it_entities(self):
         ent_list = pm.r_int64(self.proc, self.mod + Offsets.dwEntityList)
         local = pm.r_int64(self.proc, self.mod + Offsets.dwLocalPlayerController)
@@ -104,7 +104,6 @@ class CS2Esp:
 
                 if controller_ptr == local:
                     self.localTeam = pm.r_int(self.proc, local + Offsets.m_iTeamNum)
-                    
                     continue
                 
                 controller_pawn_ptr = pm.r_int64(self.proc, controller_ptr + Offsets.m_hPlayerPawn)
@@ -130,15 +129,17 @@ class CS2Esp:
                         entityTeam = pm.r_int(self.proc, entity + Offsets.m_iTeamNum)
                         playerTeam = pm.r_int(self.proc, player + Offsets.m_iTeamNum)
 
+                        if not attack_teammates and playerTeam == entityTeam: 
+                            continue
                         
-                        #if playerTeam == entityTeam: continue
                         entityHp = pm.r_int(self.proc, entity + Offsets.m_iHealth)
                         if entityHp > 0:
                             win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0)
                             time.sleep(0.005)
                             win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0)
-                            time.sleep(0.08)#M4A1-S
-                            #SNIPER time.sleep(1.4)
+                            time.sleep(0.1)#M4A1-S
+                            #time.sleep(1.4)#SNIPER
+                            #time.sleep(0.08)#AUTO-SNIPER
                 except:
                     pass
 
@@ -155,9 +156,8 @@ class CS2Esp:
             closest_dist = float('inf')
 
             for target in target_list:
-                # Check if the target's team is different from the local team
-                #if target['team'] == self.localTeam:
-                    #continue  # Skip if it's on the same team
+                if not attack_teammates and target['team'] == self.localTeam:
+                    continue  
                 
                 dist = ((target['head_pos'][0] - center_x) ** 2 + (target['head_pos'][1] - center_y) ** 2) ** 0.5
                 if dist < closest_dist:
@@ -174,9 +174,8 @@ class CS2Esp:
                 max_deltaZ = -float('inf')
 
                 for target in target_list:
-                    # Check if the target's team is different from the local team
-                    #if target['team'] == self.localTeam:
-                        #continue  # Skip if it's on the same team
+                    if not attack_teammates and target['team'] == self.localTeam:
+                        continue  
                     
                     dist = ((target['head_pos'][0] - center_x) ** 2 + (target['head_pos'][1] - center_y) ** 2) ** 0.5
 
@@ -188,9 +187,8 @@ class CS2Esp:
 
             else:
                 for target in target_list:
-                    # Check if the target's team is different from the local team
-                    #if target['team'] == self.localTeam:
-                        #continue  # Skip if it's on the same team
+                    if not attack_teammates and target['team'] == self.localTeam:
+                        continue
                     
                     dist = ((target['head_pos'][0] - center_x) ** 2 + (target['head_pos'][1] - center_y) ** 2) ** 0.5
 
@@ -202,16 +200,14 @@ class CS2Esp:
             target_x, target_y = closest_target
             if win32api.GetAsyncKeyState(0xC0):
                 dx = target_x - center_x
-                dy = target_y - center_y + 18
-                step_x = dx * 0.5  # Slow down movement by adjusting the step size
-                step_y = dy * 0.5
-                
-                if abs(dx) > 1 or abs(dy) > 1:
-                    win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, int(step_x), int(step_y), 0, 0)
+                dy = target_y - center_y
+                step_x = dx * 0.5  # Slow down movement by adjusting the multiplier
+                step_y = dy * 0.5  # Slow down movement by adjusting the multiplier
+                win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, int(step_x), int(step_y))
+
     
     def run(self):
         pm.overlay_init("Counter-Strike 2", fps=144)
-        #mem = pm.open_process("cs2.exe")
         client = pm.get_module(self.proc, "client.dll")["base"]
         center_x = win32api.GetSystemMetrics(0) // 2
         center_y = win32api.GetSystemMetrics(1) // 2
@@ -220,9 +216,11 @@ class CS2Esp:
             target_list = []
             pm.begin_drawing()
             pm.draw_fps(0, 0)
-
-            screen_radius = radius / 100.0 * min(center_x, center_y)
-            pm.draw_ellipse_lines(center_x, center_y, screen_radius, screen_radius, Colors.white)
+            
+            #Draw Circle
+            if draw_circle:
+                screen_radius = radius / 100.0 * min(center_x, center_y)
+                pm.draw_ellipse_lines(center_x, center_y, screen_radius, screen_radius, Colors.white)
             
             for ent in self.it_entities():
                 if ent.wts(view_matrix) and ent.health > 0 and not ent.dormant:
@@ -234,56 +232,58 @@ class CS2Esp:
                     width = head / 2
                     center = width / 2
 
-                    #Rectangle
-                    pm.draw_rectangle_lines(
-                        ent.head_pos2d["x"] - center,
-                        ent.head_pos2d["y"] - center / 2,
-                        width,
-                        head + center / 2,
-                        color,
-                        3
-                    )
-                    #Skeleton
-                    try:
-                            cou = pm.world_to_screen(view_matrix, ent.bone_pos(5), 1)
-                            shoulderR = pm.world_to_screen(view_matrix, ent.bone_pos(8), 1)
-                            shoulderL = pm.world_to_screen(view_matrix, ent.bone_pos(13), 1)
-                            brasR = pm.world_to_screen(view_matrix, ent.bone_pos(9), 1)
-                            brasL = pm.world_to_screen(view_matrix, ent.bone_pos(14), 1)
-                            handR = pm.world_to_screen(view_matrix, ent.bone_pos(11), 1)
-                            handL = pm.world_to_screen(view_matrix, ent.bone_pos(16), 1)
-                            waist = pm.world_to_screen(view_matrix, ent.bone_pos(0), 1)
-                            kneesR = pm.world_to_screen(view_matrix, ent.bone_pos(23), 1)
-                            kneesL = pm.world_to_screen(view_matrix, ent.bone_pos(26), 1)
-                            feetR = pm.world_to_screen(view_matrix, ent.bone_pos(24), 1)
-                            feetL = pm.world_to_screen(view_matrix, ent.bone_pos(27), 1)
-                            pm.draw_line(cou["x"], cou["y"], shoulderR["x"], shoulderR["y"], color, 1)
-                            pm.draw_line(cou["x"], cou["y"], shoulderL["x"], shoulderL["y"], color, 1)
-                            pm.draw_line(brasL["x"], brasL["y"], shoulderL["x"], shoulderL["y"], color, 1)
-                            pm.draw_line(brasR["x"], brasR["y"], shoulderR["x"], shoulderR["y"], color, 1)
-                            pm.draw_line(brasR["x"], brasR["y"], handR["x"], handR["y"], color, 1)
-                            pm.draw_line(brasL["x"], brasL["y"], handL["x"], handL["y"], color, 1)
-                            pm.draw_line(cou["x"], cou["y"], waist["x"], waist["y"], color, 1)
-                            pm.draw_line(kneesR["x"], kneesR["y"], waist["x"], waist["y"], color, 1)
-                            pm.draw_line(kneesL["x"], kneesL["y"], waist["x"], waist["y"], color, 1)
-                            pm.draw_line(kneesL["x"], kneesL["y"], feetL["x"], feetL["y"], color, 1)
-                            pm.draw_line(kneesR["x"], kneesR["y"], feetR["x"], feetR["y"], color, 1)
-                    except:
-                        pass
-                    
+                    #Draw Rectangle
+                    if draw_rectangles:
+                        pm.draw_rectangle_lines(
+                            ent.head_pos2d["x"] - center,
+                            ent.head_pos2d["y"] - center / 2,
+                            width,
+                            head + center / 2,
+                            color,
+                            3
+                        )
+                    #Draw Skeleton
+                    if draw_skeletons:
+                        try:
+                                cou = pm.world_to_screen(view_matrix, ent.bone_pos(5), 1)
+                                shoulderR = pm.world_to_screen(view_matrix, ent.bone_pos(8), 1)
+                                shoulderL = pm.world_to_screen(view_matrix, ent.bone_pos(13), 1)
+                                brasR = pm.world_to_screen(view_matrix, ent.bone_pos(9), 1)
+                                brasL = pm.world_to_screen(view_matrix, ent.bone_pos(14), 1)
+                                handR = pm.world_to_screen(view_matrix, ent.bone_pos(11), 1)
+                                handL = pm.world_to_screen(view_matrix, ent.bone_pos(16), 1)
+                                waist = pm.world_to_screen(view_matrix, ent.bone_pos(0), 1)
+                                kneesR = pm.world_to_screen(view_matrix, ent.bone_pos(23), 1)
+                                kneesL = pm.world_to_screen(view_matrix, ent.bone_pos(26), 1)
+                                feetR = pm.world_to_screen(view_matrix, ent.bone_pos(24), 1)
+                                feetL = pm.world_to_screen(view_matrix, ent.bone_pos(27), 1)
+                                pm.draw_line(cou["x"], cou["y"], shoulderR["x"], shoulderR["y"], color, 1)
+                                pm.draw_line(cou["x"], cou["y"], shoulderL["x"], shoulderL["y"], color, 1)
+                                pm.draw_line(brasL["x"], brasL["y"], shoulderL["x"], shoulderL["y"], color, 1)
+                                pm.draw_line(brasR["x"], brasR["y"], shoulderR["x"], shoulderR["y"], color, 1)
+                                pm.draw_line(brasR["x"], brasR["y"], handR["x"], handR["y"], color, 1)
+                                pm.draw_line(brasL["x"], brasL["y"], handL["x"], handL["y"], color, 1)
+                                pm.draw_line(cou["x"], cou["y"], waist["x"], waist["y"], color, 1)
+                                pm.draw_line(kneesR["x"], kneesR["y"], waist["x"], waist["y"], color, 1)
+                                pm.draw_line(kneesL["x"], kneesL["y"], waist["x"], waist["y"], color, 1)
+                                pm.draw_line(kneesL["x"], kneesL["y"], feetL["x"], feetL["y"], color, 1)
+                                pm.draw_line(kneesR["x"], kneesR["y"], feetR["x"], feetR["y"], color, 1)
+                        except:
+                            pass
+                        
                     target_list.append({
                         "pos": [ent.pos2d["x"], ent.pos2d["y"]],
                         "head_pos": [ent.head_pos2d["x"], ent.head_pos2d["y"]],
                         "deltaZ": ent.head_pos2d["y"] - ent.pos2d["y"],
-                        "team": ent.team  # Add this line to include team info
+                        "team": ent.team
                     })
 
 
-            self.aimBot(target_list, radius, aim_mode_distance=0)
+            self.aimBot(target_list, radius, aim_mode_distance=1)
             pm.end_drawing()
 
 esp = CS2Esp()
 
-# Run both aimbot and trigger bot simultaneously
+#Threading The Script
 threading.Thread(target=esp.triggerBot).start()
 threading.Thread(target=esp.run).start()
