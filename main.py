@@ -10,7 +10,12 @@ attack_teammates = False
 draw_circle = True
 draw_rectangles = True
 draw_skeletons = True
+keybinding = "X"  # Set your keybinding
+keybinding_code = ord(keybinding.upper())  # Convert key to virtual key code
+
+
 print(f"Radius = {radius}")
+
 
 
 class Offsets:
@@ -117,7 +122,7 @@ class CS2Esp:
     
     def triggerBot(self):
         while True:
-            if win32api.GetAsyncKeyState(0xC0):
+            if win32api.GetAsyncKeyState(keybinding_code):
                 try:
                     player = pm.r_int64(self.proc, self.mod + Offsets.dwLocalPlayerPawn)
                     entityId = pm.r_int(self.proc, player + Offsets.m_iIDEntIndex)
@@ -198,7 +203,7 @@ class CS2Esp:
 
         if closest_target:
             target_x, target_y = closest_target
-            if win32api.GetAsyncKeyState(0xC0):
+            if win32api.GetAsyncKeyState(keybinding_code):
                 dx = target_x - center_x
                 dy = target_y - center_y
                 step_x = dx * 0.5  # Slow down movement by adjusting the multiplier
@@ -279,7 +284,7 @@ class CS2Esp:
                     })
 
 
-            self.aimBot(target_list, radius, aim_mode_distance=1)
+            self.aimBot(target_list, radius, aim_mode_distance=0)
             pm.end_drawing()
 
 esp = CS2Esp()
