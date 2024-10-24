@@ -1,26 +1,34 @@
 import requests
 import pyMeow as pm
+import pymem
 import win32api, win32con
 import threading
 import time
+import random
 
 # Settings
 radius = 15
+shooting_delay = 0.2
 attack_teammates = False
 draw_circle = True
 draw_rectangles = True
 draw_skeletons = True
+
+aim_target = "body"  # Options: "head" or "body"
 keybinding = "X"  # Set your keybinding
 keybinding_code = ord(keybinding.upper())  # Convert key to virtual key code
 
+random_factor_x = 5
+random_factor_y = 5
 
-print(f"Radius = {radius}")
-
-
+print(f"Circle Radius = {radius}")
+print("Aim Target = " + aim_target)
+print("Keybinding = " + keybinding)
 
 class Offsets:
     m_pBoneArray = 496
-
+    m_iShotsFired = 0x23E4
+    m_aimPunchAngle = 0x1584
 
 class Colors:
     red = pm.get_color("red")
@@ -73,11 +81,8 @@ class Entity:
 
 class CS2Esp:
     def __init__(self):
-        print("Hooking...")
         self.proc = pm.open_process("cs2.exe")
         self.mod = pm.get_module(self.proc, "client.dll")["base"]
-        print("Attached!")
-        print("Updating Offsets...")
         self.localTeam = None
         offsets_name = ["dwViewMatrix", "dwEntityList", "dwLocalPlayerController", "dwLocalPlayerPawn"]
         offsets = requests.get("https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json").json()
@@ -96,12 +101,10 @@ class CS2Esp:
         }
         clientDll = requests.get("https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json").json()
         [setattr(Offsets, k, clientDll["client.dll"]["classes"][client_dll_name[k]]["fields"][k]) for k in client_dll_name]
-        print("Offsets up to date!")
 
     def it_entities(self):
         ent_list = pm.r_int64(self.proc, self.mod + Offsets.dwEntityList)
         local = pm.r_int64(self.proc, self.mod + Offsets.dwLocalPlayerController)
-
         for i in range(1, 65):
             try:
                 entry_ptr = pm.r_int64(self.proc, ent_list + (8 * (i & 0x7FFF) >> 9) + 16)
@@ -139,11 +142,16 @@ class CS2Esp:
                         
                         entityHp = pm.r_int(self.proc, entity + Offsets.m_iHealth)
                         if entityHp > 0:
+                            #time.sleep(0.005)
                             win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0)
                             time.sleep(0.005)
                             win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0)
-                            time.sleep(0.1)#M4A1-S
-                            #time.sleep(1.4)#SNIPER
+                            #M4A1-S
+                            if aim_target == "body":
+                                time.sleep(shooting_delay - shooting_delay / 1.5)
+                            else:
+                                time.sleep(shooting_delay)
+                            #time.sleep(1.4) #SNIPER
                             #time.sleep(0.08)#AUTO-SNIPER
                 except:
                     pass
@@ -156,58 +164,47 @@ class CS2Esp:
         center_x = win32api.GetSystemMetrics(0) // 2
         center_y = win32api.GetSystemMetrics(1) // 2
         
-        if radius == 0:
-            closest_target = None
-            closest_dist = float('inf')
+        screen_radius = radius / 100.0 * min(center_x, center_y)
+        closest_target = None
+        closest_dist = float('inf')
+        
+        for target in target_list:
+            if not attack_teammates and target['team'] == self.localTeam:
+                continue
+            
+            head_x, head_y = target['head_pos'][0], target['head_pos'][1]
+            center_mass_x, center_mass_y = (target['head_pos'][0] + target['pos'][0]) / 2, (target['head_pos'][1] + target['pos'][1]) / 2
+            midpoint_x = (head_x + center_mass_x) / 2
+            midpoint_y = (head_y + center_mass_y) / 2
+            adjusted_y = midpoint_y - (center_mass_y - head_y) * 0.1
 
-            for target in target_list:
-                if not attack_teammates and target['team'] == self.localTeam:
-                    continue  
-                
+            if aim_target == "head":
                 dist = ((target['head_pos'][0] - center_x) ** 2 + (target['head_pos'][1] - center_y) ** 2) ** 0.5
-                if dist < closest_dist:
+                if dist < screen_radius and dist < closest_dist:
                     closest_target = target['head_pos']
-                    closest_dist = dist 
-
-        else:
-            screen_radius = radius / 100.0 * min(center_x, center_y)
-            closest_target = None
-            closest_dist = float('inf')
-
-            if aim_mode_distance == 1:
-                target_with_max_deltaZ = None
-                max_deltaZ = -float('inf')
-
-                for target in target_list:
-                    if not attack_teammates and target['team'] == self.localTeam:
-                        continue  
-                    
-                    dist = ((target['head_pos'][0] - center_x) ** 2 + (target['head_pos'][1] - center_y) ** 2) ** 0.5
-
-                    if dist < screen_radius and target['deltaZ'] > max_deltaZ:
-                        max_deltaZ = target['deltaZ']
-                        target_with_max_deltaZ = target
-
-                closest_target = target_with_max_deltaZ['head_pos'] if target_with_max_deltaZ else None
-
+                    closest_dist = dist
             else:
-                for target in target_list:
-                    if not attack_teammates and target['team'] == self.localTeam:
-                        continue
-                    
-                    dist = ((target['head_pos'][0] - center_x) ** 2 + (target['head_pos'][1] - center_y) ** 2) ** 0.5
-
-                    if dist < screen_radius and dist < closest_dist:
-                        closest_target = target['head_pos']
-                        closest_dist = dist
+                dist = ((midpoint_x - center_x) ** 2 + (adjusted_y - center_y) ** 2) ** 0.5
+                if dist < screen_radius and dist < closest_dist:
+                    closest_target = {'x': midpoint_x, 'y': adjusted_y}
+                    closest_dist = dist
 
         if closest_target:
-            target_x, target_y = closest_target
+            if aim_target == "head":
+                target_x, target_y = closest_target
+            else:
+                target_x, target_y = closest_target['x'], closest_target['y']
+                
             if win32api.GetAsyncKeyState(keybinding_code):
                 dx = target_x - center_x
                 dy = target_y - center_y
-                step_x = dx * 0.5  # Slow down movement by adjusting the multiplier
-                step_y = dy * 0.5  # Slow down movement by adjusting the multiplier
+
+                random_x = random.uniform(-random_factor_x, random_factor_x)
+                random_y = random.uniform(-random_factor_y, random_factor_y)
+
+                step_x = dx * 0.5 + random_x
+                step_y = dy * 0.5 + random_y
+
                 win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, int(step_x), int(step_y))
 
     
@@ -216,12 +213,24 @@ class CS2Esp:
         client = pm.get_module(self.proc, "client.dll")["base"]
         center_x = win32api.GetSystemMetrics(0) // 2
         center_y = win32api.GetSystemMetrics(1) // 2
+        toggle_delay = 0.3
+        last_toggle_time = time.time()
+        
         while pm.overlay_loop():
             view_matrix = pm.r_floats(self.proc, self.mod + Offsets.dwViewMatrix, 16)
             target_list = []
+            global aim_target
+            
+            if win32api.GetAsyncKeyState(ord('O')) and time.time() - last_toggle_time > toggle_delay:
+                if aim_target == "head":
+                    aim_target = "body"
+                else:
+                    aim_target = "head"
+                last_toggle_time = time.time()
+
             pm.begin_drawing()
             pm.draw_fps(0, 0)
-            
+            pm.draw_text(str(aim_target), 0, 20, 20, Colors.white)
             #Draw Circle
             if draw_circle:
                 screen_radius = radius / 100.0 * min(center_x, center_y)
@@ -236,7 +245,7 @@ class CS2Esp:
                     head = ent.pos2d["y"] - ent.head_pos2d["y"]
                     width = head / 2
                     center = width / 2
-
+            
                     #Draw Rectangle
                     if draw_rectangles:
                         pm.draw_rectangle_lines(
@@ -290,5 +299,7 @@ class CS2Esp:
 esp = CS2Esp()
 
 #Threading The Script
+print()
 threading.Thread(target=esp.triggerBot).start()
 threading.Thread(target=esp.run).start()
+print("Threading Functions")
